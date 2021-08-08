@@ -76,6 +76,7 @@ class AutoCrawler:
         self.face = face
         self.no_gui = no_gui
         self.limit = limit
+        # TODO: limit on google and naver respectively
         self.proxy_list = proxy_list if proxy_list and len(proxy_list) > 0 else None
 
         os.makedirs('./{}'.format(self.download_path), exist_ok=True)
@@ -228,10 +229,10 @@ class AutoCrawler:
             return
 
         try:
-            print('Collecting links... {} from {}'.format(keyword, site_name))
+            print('Collecting links... {} from {}{}'.format(keyword, site_name, f' [{proxy}]' if proxy else ''))
 
             if site_code == Sites.GOOGLE:
-                links = collect.google(keyword, add_url)
+                links = collect.google(keyword, add_url, max_count=self.limit)
 
             elif site_code == Sites.NAVER:
                 links = collect.naver(keyword, add_url)

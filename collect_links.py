@@ -15,10 +15,12 @@ Copyright 2018 YoongiKim
 """
 
 import time
+import logging
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import ElementNotVisibleException, StaleElementReferenceException
+from selenium.common.exceptions import ElementNotVisibleException, StaleElementReferenceException, \
+    NoSuchElementException
 import platform
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -83,19 +85,10 @@ class CollectLinks:
         return pos
 
     def wait_and_click(self, xpath):
-        #  Sometimes click fails unreasonably. So tries to click at all cost.
-        try:
-            w = WebDriverWait(self.browser, 15)
-            elem = w.until(EC.element_to_be_clickable((By.XPATH, xpath)))
-            elem.click()
-            self.highlight(elem)
-        except Exception as e:
-            print('Click time out - {}'.format(xpath))
-            print('Refreshing browser...')
-            self.browser.refresh()
-            time.sleep(2)
-            return self.wait_and_click(xpath)
-
+        w = WebDriverWait(self.browser, 15)
+        elem = w.until(EC.element_to_be_clickable((By.XPATH, xpath)))
+        elem.click()
+        self.highlight(elem)
         return elem
 
     def highlight(self, element):
@@ -106,31 +99,66 @@ class CollectLinks:
     def remove_duplicates(_list):
         return list(dict.fromkeys(_list))
 
-    def google(self, keyword, add_url=""):
-        self.browser.get("https://www.google.com/search?q={}&source=lnms&tbm=isch{}".format(keyword, add_url))
-
-        time.sleep(1)
-
-        print('Scrolling down')
-
-        elem = self.browser.find_element_by_tag_name("body")
-
-        for i in range(60):
-            elem.send_keys(Keys.PAGE_DOWN)
+    def scroll_to_bottom(self, body_elem, next_page_xpath) -> bool:
+        """
+        :param body_elem:
+        :param next_page_xpath:
+        :return: if the next page button can be clicked
+        """
+        # You may need to change this. Because google image changes rapidly.
+        while True:
+            body_elem.send_keys(Keys.PAGE_DOWN)
+            try:
+                next_page_button = self.browser.find_element_by_xpath(next_page_xpath)
+                if next_page_button.is_displayed():
+                    return True
+                elem = self.browser.find_element_by_xpath('//div[@data-status]')
+                if not elem.is_displayed():
+                    # the element div[@data-status="5"] can be found
+                    # but is not displayed means that other error occurs.
+                    # for example: "The rest of the results might not be what you're looking for."
+                    return False
+                # data-status:
+                # 1: normal. the browser is scrolling.
+                # 2: "Unable to load more. Retry"
+                # 3, 4: "Looks like you've reached the end"
+                # 5: normal.
+                data_status = elem.get_attribute("data-status")
+                if data_status != "1" and data_status != "5":
+                    return False
+                # normal. continue the loop
+            except NoSuchElementException:
+                raise Exception('next_page_elem cannot be found. The page is damaged or your code may should be '
+                                'updated.')
             time.sleep(0.2)
 
-        try:
-            # You may need to change this. Because google image changes rapidly.
-            # btn_more = self.browser.find_element(By.XPATH, '//input[@value="결과 더보기"]')
-            # self.wait_and_click('//input[@id="smb"]')
-            self.wait_and_click('//input[@type="button"]')
+    def google(self, keyword, add_url="", max_count=0):
+        # TODO: max_count
 
-            for i in range(60):
-                elem.send_keys(Keys.PAGE_DOWN)
-                time.sleep(0.2)
+        # You may need to change this. Because google image changes rapidly.
+        page_ready_xpath = '//div[@data-cid="GRID_STATE0"]'
+        next_page_xpath = '//input[@type="button"]'
 
-        except ElementNotVisibleException:
-            pass
+        self.browser.get("https://www.google.com/search?q={}&source=lnms&tbm=isch{}".format(keyword, add_url))
+        time.sleep(1)
+        while True:
+            try:
+                print('Scrolling down')
+
+                elem = self.browser.find_element_by_css_selector("body")
+                w = WebDriverWait(self.browser, 15)
+                w.until(EC.element_to_be_clickable((By.XPATH, page_ready_xpath)))
+
+                # FIXME: only scroll two pages
+                if self.scroll_to_bottom(body_elem=elem, next_page_xpath=next_page_xpath):
+                    self.wait_and_click(next_page_xpath)
+                    self.scroll_to_bottom(body_elem=elem, next_page_xpath=next_page_xpath)
+                break
+            except Exception as e:
+                logging.exception("Something awful happened!")
+                print('Refreshing browser...')
+                self.browser.refresh()
+                time.sleep(2)
 
         photo_grid_boxes = self.browser.find_elements(By.XPATH, '//div[@class="bRMDJf islir"]')
 
